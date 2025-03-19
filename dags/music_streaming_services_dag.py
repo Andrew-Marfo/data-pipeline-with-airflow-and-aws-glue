@@ -6,6 +6,7 @@ import os
 import pandas as pd
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from helpers.combine_csv_files import combine_csv_files
+from helpers.validate_csv_files import validate_csv_files
 
 # Function to validate if files exist in the streaming folder
 def validate_streams_in_s3(**kwargs):
@@ -37,6 +38,16 @@ def extract_and_combine_streams(**kwargs):
     users_temp_path = combine_csv_files(s3_hook,"music-streaming-services","users/", "users.csv")
     ti.xcom_push(key='users_csv_path', value=users_temp_path)
     print(f"Users CSV saved to: {users_temp_path}")
+
+# Function to validate CSV files and decide the next task
+def validate_csv_files_and_decide(**kwargs):
+    try:
+        validate_csv_files(**kwargs)
+        return 'move_files_to_intermediate_bucket'  # Proceed to the next task
+    except ValueError as e:
+        print(f"Validation failed: {e}")
+        return 'end_dag_if_validation_fails_task'
+
 
 # Move extracted files to an intermediate bucket
 def move_files_to_intermediate_bucket(**kwargs):
@@ -103,7 +114,7 @@ check_streaming_data = BranchPythonOperator(
 )
 
 # Tasks for each branch
-extract_and_combine_streams = PythonOperator(
+extract_and_combine_streams_task = PythonOperator(
     task_id='extract_and_combine_streams',
     python_callable=extract_and_combine_streams,
     provide_context=True,
@@ -117,13 +128,28 @@ end_dag_if_no_streams_exists_task = EmptyOperator(
 )
 
 # Task to move files to an intermediate bucket
-move_files_to_intermediate_bucket = PythonOperator(
+move_files_to_intermediate_bucket_task = PythonOperator(
     task_id='move_files_to_intermediate_bucket',
     python_callable=move_files_to_intermediate_bucket,
     provide_context=True,
     dag=dag
 )
 
+# Task to validate CSV files and decide the next task
+validate_csv_files_task = BranchPythonOperator(
+    task_id='validate_csv_files_and_decide',
+    python_callable=validate_csv_files_and_decide,
+    provide_context=True,
+    dag=dag
+)
+
+# Task to end the DAG if validation fails
+end_dag_if_validation_fails_task = EmptyOperator(
+    task_id='end_dag_if_validation_fails_task',
+    dag=dag
+)
+
 # Define dependencies
-check_streaming_data >> [extract_and_combine_streams, end_dag_if_no_streams_exists_task]
-extract_and_combine_streams >> move_files_to_intermediate_bucket
+check_streaming_data >> [extract_and_combine_streams_task, end_dag_if_no_streams_exists_task]
+extract_and_combine_streams_task >> validate_csv_files_task
+validate_csv_files_task >> [move_files_to_intermediate_bucket_task, end_dag_if_validation_fails_task]
