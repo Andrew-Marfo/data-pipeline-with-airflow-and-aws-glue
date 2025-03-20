@@ -1,9 +1,8 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.providers.amazon.aws.operators.glue import GlueJobOperator
 from airflow.operators.empty import EmptyOperator
 from datetime import datetime, timedelta
-import os
-import pandas as pd
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from helpers.combine_csv_files import combine_csv_files
 from helpers.validate_csv_files import validate_csv_files
@@ -149,7 +148,21 @@ end_dag_if_validation_fails_task = EmptyOperator(
     dag=dag
 )
 
+# Task to trigger the Glue job
+trigger_glue_job = GlueJobOperator(
+    task_id='trigger_glue_job',
+    job_name="Transform and compute KPI's",
+    aws_conn_id='aws_default',
+    script_args={
+        "--S3_SOURCE_PATH": "s3://music-streaming-intermediate/",
+        "--DYNAMODB_TABLE": "music_kpis_table",
+    },
+    dag=dag
+)
+
+
 # Define dependencies
 check_streaming_data >> [extract_and_combine_streams_task, end_dag_if_no_streams_exists_task]
 extract_and_combine_streams_task >> validate_csv_files_task
 validate_csv_files_task >> [move_files_to_intermediate_bucket_task, end_dag_if_validation_fails_task]
+move_files_to_intermediate_bucket_task >> trigger_glue_job 
