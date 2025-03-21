@@ -11,6 +11,6 @@ def delete_files_from_intermediate_bucket(intermediate_bucket):
         if files_to_delete:
             # Delete all files in the folder
             s3_hook.delete_objects(bucket=intermediate_bucket, keys=files_to_delete)
-            print(f"Deleted {len(files_to_delete)} files from {folder} in the intermediate bucket.")
+            print(f"✅Deleted {len(files_to_delete)} files from {folder} in the intermediate bucket.")
         else:
             print(f"No files to delete in {folder} in the intermediate bucket.")

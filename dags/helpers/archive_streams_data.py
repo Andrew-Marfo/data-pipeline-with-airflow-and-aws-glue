@@ -21,8 +21,8 @@ def archive_streams_data(source_bucket, archive_bucket):
             Key=file_key,
             StorageClass='DEEP_ARCHIVE'  # Specify Glacier storage class
         )
-        print(f"File {file_key} copied to archive bucket (Glacier): s3://{archive_bucket}/{file_key}")
+        print(f"✅File {file_key} copied to archive bucket (Glacier): s3://{archive_bucket}/{file_key}")
 
         # Delete file from source bucket
         s3_hook.delete_objects(bucket=source_bucket, keys=[file_key])
-        print(f"File {file_key} deleted from source bucket.")
+        print(f"✅File {file_key} deleted from source bucket.")

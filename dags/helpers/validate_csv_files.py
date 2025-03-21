@@ -26,4 +26,4 @@ def validate_csv_files(**kwargs):
     validate_csv(songs_csv_path, songs_required_columns)
     validate_csv(users_csv_path, users_required_columns)
 
-    print("All CSV files validated successfully.")
+    print("✅All CSV files validated successfully.")

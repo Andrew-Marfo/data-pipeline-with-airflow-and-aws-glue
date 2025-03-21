@@ -2,13 +2,13 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.providers.amazon.aws.operators.glue import GlueJobOperator
 from airflow.operators.empty import EmptyOperator
+from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from datetime import datetime, timedelta
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from dotenv import load_dotenv
 import os
+from dags.extract_and_combine_streams import extract_and_combine_streams
 from helpers.validate_streams_in_s3 import validate_streams_in_s3
 from helpers.move_files_to_intermediate_bucket import move_files_to_intermediate_bucket
-from helpers.combine_csv_files import combine_csv_files
 from helpers.validate_csv_files import validate_csv_files
 from helpers.delete_intermediate_bucket_files import delete_files_from_intermediate_bucket
 from helpers.archive_streams_data import archive_streams_data
@@ -20,33 +20,13 @@ SOURCE_BUCKET = os.getenv("SOURCE_BUCKET_NAME")
 INTERMEDIATE_BUCKET = os.getenv("INTERMEDIATE_BUCKET_NAME")
 ARCHIVE_BUCKET = os.getenv("ARCHIVE_BUCKET_NAME")
 
-# Function to extract and combine streams
-def extract_and_combine_streams(**kwargs):
-    s3_hook = S3Hook(aws_conn_id='aws_default')
-    ti = kwargs['ti']
-
-    # Process streams folder (combine multiple CSV files)
-    streams_temp_path = combine_csv_files(s3_hook,SOURCE_BUCKET,"streams/", "combined_streams.csv")
-    ti.xcom_push(key='streams_csv_path', value=streams_temp_path)
-    print(f"Combined streams CSV saved to: {streams_temp_path}")
-
-    # Process songs folder (single CSV file)
-    songs_temp_path = combine_csv_files(s3_hook,SOURCE_BUCKET,"songs/", "songs.csv")
-    ti.xcom_push(key='songs_csv_path', value=songs_temp_path)
-    print(f"Songs CSV saved to: {songs_temp_path}")
-
-    # Process users folder (single CSV file)
-    users_temp_path = combine_csv_files(s3_hook,SOURCE_BUCKET,"users/", "users.csv")
-    ti.xcom_push(key='users_csv_path', value=users_temp_path)
-    print(f"Users CSV saved to: {users_temp_path}")
-
 # Function to validate CSV files and decide the next task
 def validate_csv_files_and_decide(**kwargs):
     try:
         validate_csv_files(**kwargs)
-        return 'move_files_to_intermediate_bucket'  # Proceed to the next task
+        return 'move_files_to_intermediate_bucket'
     except ValueError as e:
-        print(f"Validation failed: {e}")
+        print(f"❌Validation failed: {e}")
         return 'end_dag_if_validation_fails_task'
 
 
@@ -72,34 +52,47 @@ start_dag_task = EmptyOperator(
     dag=dag
 )
 
-# Branching Operator
-check_streaming_data = BranchPythonOperator(
-    task_id='check_streaming_data',
-    python_callable=validate_streams_in_s3,  # Pass the function itself
-    op_kwargs={'bucket_name': SOURCE_BUCKET},  # Pass arguments here
-    provide_context=True,
+# S3 Sensor to check for new files in the streams folder
+sense_streaming_data = S3KeySensor(
+    task_id='sense_streaming_data',
+    bucket_key=f's3://{SOURCE_BUCKET}/streams/',
+    aws_conn_id='aws_default',
+    timeout=18 * 60 * 60,  # 18 hours timeout
+    poke_interval=60 * 5,  # Check every 5 minutes
+    mode='poke',
     dag=dag
 )
+
+
+# Branching Operator
+# check_streaming_data = BranchPythonOperator(
+#     task_id='check_streaming_data',
+#     python_callable=validate_streams_in_s3,  
+#     op_kwargs={'bucket_name': SOURCE_BUCKET}, 
+#     provide_context=True,
+#     dag=dag
+# )
 
 # Tasks for each branch
 extract_and_combine_streams_task = PythonOperator(
     task_id='extract_and_combine_streams',
     python_callable=extract_and_combine_streams,
+    op_kwargs={'bucket_name': SOURCE_BUCKET}, 
     provide_context=True,
     dag=dag
 )
 
 # Task to end the DAG if no streams exist
-end_dag_if_no_streams_exists_task = EmptyOperator(
-    task_id='end_dag_if_no_streams_exists_task',
-    dag=dag
-)
+# end_dag_if_no_streams_exists_task = EmptyOperator(
+#     task_id='end_dag_if_no_streams_exists_task',
+#     dag=dag
+# )
 
 # Task to move files to an intermediate bucket
 move_files_to_intermediate_bucket_task = PythonOperator(
     task_id='move_files_to_intermediate_bucket',
-    python_callable=move_files_to_intermediate_bucket,  # Pass the function itself
-    op_kwargs={'intermediate_bucket': INTERMEDIATE_BUCKET},  # Pass arguments here
+    python_callable=move_files_to_intermediate_bucket, 
+    op_kwargs={'intermediate_bucket': INTERMEDIATE_BUCKET}, 
     provide_context=True,
     dag=dag
 )
@@ -133,8 +126,8 @@ trigger_glue_job = GlueJobOperator(
 # Task to delete files from the intermediate bucket
 delete_files_from_intermediate_bucket_task = PythonOperator(
     task_id='delete_files_from_intermediate_bucket',
-    python_callable=delete_files_from_intermediate_bucket,  # Pass the function itself
-    op_kwargs={'intermediate_bucket': INTERMEDIATE_BUCKET},  # Pass arguments here
+    python_callable=delete_files_from_intermediate_bucket,
+    op_kwargs={'intermediate_bucket': INTERMEDIATE_BUCKET}, 
     provide_context=True,
     dag=dag
 )
@@ -142,8 +135,8 @@ delete_files_from_intermediate_bucket_task = PythonOperator(
 # Task to archive streams data from the source bucket
 archive_streams_data_task = PythonOperator(
     task_id='archive_streams_data',
-    python_callable=archive_streams_data,  # Pass the function itself
-    op_kwargs={'source_bucket': SOURCE_BUCKET, 'archive_bucket': ARCHIVE_BUCKET},  # Pass arguments here
+    python_callable=archive_streams_data,
+    op_kwargs={'source_bucket': SOURCE_BUCKET, 'archive_bucket': ARCHIVE_BUCKET},
     provide_context=True,
     dag=dag
 )
@@ -155,7 +148,7 @@ end_dag_task = EmptyOperator(
 )
 
 # Define dependencies
-start_dag_task >> check_streaming_data >> [extract_and_combine_streams_task, end_dag_if_no_streams_exists_task]
+start_dag_task >> sense_streaming_data  >> extract_and_combine_streams_task
 extract_and_combine_streams_task >> validate_csv_files_task
 validate_csv_files_task >> [move_files_to_intermediate_bucket_task, end_dag_if_validation_fails_task]
 move_files_to_intermediate_bucket_task >> trigger_glue_job
