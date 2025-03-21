@@ -6,7 +6,7 @@ from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
-from dags.extract_and_combine_streams import extract_and_combine_streams
+from helpers.extract_and_combine_streams import extract_and_combine_streams
 from helpers.validate_streams_in_s3 import validate_streams_in_s3
 from helpers.move_files_to_intermediate_bucket import move_files_to_intermediate_bucket
 from helpers.validate_csv_files import validate_csv_files
@@ -63,16 +63,6 @@ sense_streaming_data = S3KeySensor(
     dag=dag
 )
 
-
-# Branching Operator
-# check_streaming_data = BranchPythonOperator(
-#     task_id='check_streaming_data',
-#     python_callable=validate_streams_in_s3,  
-#     op_kwargs={'bucket_name': SOURCE_BUCKET}, 
-#     provide_context=True,
-#     dag=dag
-# )
-
 # Tasks for each branch
 extract_and_combine_streams_task = PythonOperator(
     task_id='extract_and_combine_streams',
@@ -81,12 +71,6 @@ extract_and_combine_streams_task = PythonOperator(
     provide_context=True,
     dag=dag
 )
-
-# Task to end the DAG if no streams exist
-# end_dag_if_no_streams_exists_task = EmptyOperator(
-#     task_id='end_dag_if_no_streams_exists_task',
-#     dag=dag
-# )
 
 # Task to move files to an intermediate bucket
 move_files_to_intermediate_bucket_task = PythonOperator(
