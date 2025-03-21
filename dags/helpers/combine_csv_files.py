@@ -1,4 +1,3 @@
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 import pandas as pd
 
 def combine_csv_files(s3_hook,bucket_name,folder_prefix, output_file_name):
