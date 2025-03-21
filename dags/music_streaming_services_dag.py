@@ -13,6 +13,7 @@ from helpers.validate_csv_files import validate_csv_files
 from helpers.delete_intermediate_bucket_files import delete_files_from_intermediate_bucket
 from helpers.archive_streams_data import archive_streams_data
 
+
 # Loading environment variables from .env file
 load_dotenv()
 SOURCE_BUCKET = os.getenv("SOURCE_BUCKET_NAME")
@@ -117,7 +118,7 @@ trigger_glue_job = GlueJobOperator(
     job_name="Transform and compute KPI's",
     aws_conn_id='aws_default',
     script_args={
-        "--S3_SOURCE_PATH": "s3://music-streaming-intermediate/",
+        "--S3_SOURCE_PATH": f"s3://{INTERMEDIATE_BUCKET}/",
         "--DYNAMODB_TABLE": "music_kpis_table",
     },
     dag=dag

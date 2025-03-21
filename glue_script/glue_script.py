@@ -82,20 +82,24 @@ genre_kpis = genre_kpis.withColumn(
     "avg_listening_time_per_user", round(col("avg_listening_time_per_user_ms") / 60000, 2)
 ).drop("total_listening_time_ms", "avg_listening_time_per_user_ms")
 
-# Compute the most popular songs per genre per day
-song_per_genre_rank_window = Window.partitionBy("date", "track_genre").orderBy(F.desc("track_listen_count"))
 
-song_plays = merged_df.groupBy("date", "track_genre", "track_name").agg(
-    count("track_id").alias("track_listen_count")
-)
+# Compute the top 3 songs per genre per day based on play count
+window_spec_top_songs = Window.partitionBy("date", "track_genre").orderBy(F.desc("play_count"))
 
-song_per_genre_rank = song_plays.withColumn("rank", dense_rank().over(song_per_genre_rank_window))
-top_3_songs_per_genre_per_day = song_per_genre_rank.filter(col("rank") <= 3).orderBy("date", "track_genre", "rank")
+top_3_songs_per_genre_per_day = merged_df.groupBy("date", "track_genre", "track_name").agg(
+    count("track_id").alias("play_count")  # Count the number of plays per song per genre per day
+).withColumn("rank", F.row_number().over(window_spec_top_songs)) \
+    .filter(col("rank") <= 3) \
+    .select("date", "track_genre", "track_name", "play_count") \
+    .withColumnRenamed("track_name", "top_3_songs") \
+    .withColumnRenamed("play_count", "song_play_count")
 
-# Aggregate the top 3 songs per genre per day into a single column
+
+# Aggregate only the top 3 songs per genre per day into a single column
 top_3_songs_aggregated = top_3_songs_per_genre_per_day.groupBy("date", "track_genre").agg(
-    concat_ws("|", collect_list("track_name")).alias("top_3_songs_per_genre")
+    concat_ws("|", collect_list("top_3_songs")).alias("top_3_songs_per_genre")
 )
+
 
 # Join the aggregated top 3 songs with genre_kpis
 genre_kpis_with_top_songs = genre_kpis.join(
