@@ -66,6 +66,12 @@ dag = DAG(
     catchup=False
 )
 
+#Starting the dag task
+start_dag_task = EmptyOperator(
+    task_id='start_dag_task',
+    dag=dag
+)
+
 # Branching Operator
 check_streaming_data = BranchPythonOperator(
     task_id='check_streaming_data',
@@ -142,10 +148,15 @@ archive_streams_data_task = PythonOperator(
     dag=dag
 )
 
+# End dag task
+end_dag_task = EmptyOperator(
+    task_id='end_dag_task',
+    dag=dag
+)
 
 # Define dependencies
-check_streaming_data >> [extract_and_combine_streams_task, end_dag_if_no_streams_exists_task]
+start_dag_task >> check_streaming_data >> [extract_and_combine_streams_task, end_dag_if_no_streams_exists_task]
 extract_and_combine_streams_task >> validate_csv_files_task
 validate_csv_files_task >> [move_files_to_intermediate_bucket_task, end_dag_if_validation_fails_task]
 move_files_to_intermediate_bucket_task >> trigger_glue_job
-trigger_glue_job >> [delete_files_from_intermediate_bucket_task, archive_streams_data_task]
+trigger_glue_job >> [delete_files_from_intermediate_bucket_task, archive_streams_data_task] >> end_dag_task
